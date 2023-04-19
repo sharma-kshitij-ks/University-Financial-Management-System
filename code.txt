@@ -1,0 +1,556 @@
+CREATE TABLE users (
+  user_id NUMBER(9) NOT NULL PRIMARY KEY, 
+  user_name VARCHAR2(50) , 
+  user_email VARCHAR2(100) UNIQUE, 
+  user_account_number NUMBER(9), 
+ user_scholarship_amount number DEFAULT NULL,
+  user_authorisation_type VARCHAR2(50), 
+  user_gpa NUMBER(3,2),
+  total_transactions NUMBER(10,2) DEFAULT 0
+);
+CREATE TABLE transactions (
+  transaction_id NUMBER(15) PRIMARY KEY, 
+  transaction_date DATE, 
+  transaction_amount NUMBER(10,2), 
+  transaction_type VARCHAR2(20) DEFAULT 'RECEIVED', 
+  transaction_account NUMBER(9) DEFAULT 102103388,
+  transaction_user number(9),
+  description VARCHAR2(100)
+);
+CREATE TABLE fees (
+  fee_id NUMBER(15) NOT NULL PRIMARY KEY, 
+  fee_name VARCHAR2(50) , 
+  fee_amount NUMBER(10,2) , 
+  fee_description VARCHAR2(200), 
+  fee_date DATE ,
+ user_id_for_fee NUMBER(9) 
+);
+
+CREATE TABLE funding (
+  funding_id NUMBER(15) NOT NULL PRIMARY KEY, 
+  funding_name VARCHAR2(50) , 
+  funding_amount NUMBER(10,2) , 
+  funding_description VARCHAR2(200), 
+  funding_date DATE  
+);
+
+CREATE TABLE scholarship (
+  scholarship_id NUMBER(2) NOT NULL PRIMARY KEY, 
+  scholarship_user_id NUMBER(9) REFERENCES users(user_id), 
+  scholarship_name VARCHAR2(50) , 
+  scholarship_amount NUMBER(10,2) , 
+  scholarship_description VARCHAR2(200), 
+  scholarship_criteria VARCHAR2(200) 
+);
+
+CREATE TABLE expenditure (
+  expenditure_id NUMBER(15) NOT NULL PRIMARY KEY, 
+  expenditure_name VARCHAR2(50), 
+  expenditure_amount NUMBER(10,2), 
+  expenditure_description VARCHAR2(200), 
+  expenditure_date DATE 
+);
+
+CREATE TABLE tax (
+  tax_id NUMBER(15) NOT NULL PRIMARY KEY, 
+  tax_name VARCHAR2(50), 
+  tax_amount NUMBER,
+  tax_rate NUMBER(5,2) 
+);
+
+
+
+
+CREATE OR REPLACE PROCEDURE calculate_expenditure (
+  p_start_date IN DATE,
+  p_end_date IN DATE,
+  p_total_out OUT NUMBER
+) IS
+  v_total_out NUMBER(10,2) := 0;
+  v_expenditure_name expenditure.expenditure_name%TYPE;
+  v_expenditure_amount expenditure.expenditure_amount%TYPE;
+  v_expenditure_date expenditure.expenditure_date%TYPE;
+BEGIN
+  
+  FOR c_expense IN (SELECT expenditure_amount
+                    FROM expenditure
+                    WHERE expenditure_date >= p_start_date AND expenditure_date <= p_end_date) LOOP
+    v_total_out := v_total_out + c_expense.expenditure_amount;
+  END LOOP;
+
+
+  p_total_out := v_total_out;
+
+EXCEPTION
+
+  WHEN NO_DATA_FOUND THEN
+    DBMS_OUTPUT.PUT_LINE('No expenditure found within specified date range.');
+  WHEN OTHERS THEN
+    DBMS_OUTPUT.PUT_LINE('An error occurred: ' || SQLERRM);
+END;
+
+
+
+
+
+CREATE OR REPLACE PROCEDURE insert_transaction (
+  p_transaction_date IN DATE,
+  p_transaction_amount IN NUMBER,
+  p_transaction_type IN VARCHAR2,
+  p_transaction_account IN NUMBER DEFAULT 102103388,
+  p_transaction_user IN NUMBER,
+  p_description IN VARCHAR2 DEFAULT NULL
+) IS
+  v_transaction_id NUMBER(15);
+  v_count NUMBER(1);
+  v_transaction_row transactions%ROWTYPE; -- Declare a variable of type transactions%ROWTYPE
+BEGIN
+  -- Generate a random transaction ID
+  LOOP
+    v_transaction_id := TRUNC(DBMS_RANDOM.VALUE(100000000000000, 999999999999999));
+    SELECT COUNT(*) INTO v_count FROM transactions WHERE transaction_id = v_transaction_id;
+    EXIT WHEN v_count = 0;
+  END LOOP;
+
+  -- Insert the transaction record
+  INSERT INTO transactions (transaction_id, transaction_date, transaction_amount, transaction_type, transaction_account, transaction_user, description)
+  VALUES (v_transaction_id, p_transaction_date, p_transaction_amount, p_transaction_type, p_transaction_account, p_transaction_user, p_description);
+
+  -- Get the inserted record
+  SELECT * INTO v_transaction_row FROM transactions WHERE transaction_id = v_transaction_id;
+  
+  -- Display the inserted record
+  DBMS_OUTPUT.PUT_LINE('Transaction ID: ' || v_transaction_row.transaction_id);
+  DBMS_OUTPUT.PUT_LINE('Transaction Date: ' || v_transaction_row.transaction_date);
+  DBMS_OUTPUT.PUT_LINE('Transaction Amount: ' || v_transaction_row.transaction_amount);
+  DBMS_OUTPUT.PUT_LINE('Transaction Type: ' || v_transaction_row.transaction_type);
+  DBMS_OUTPUT.PUT_LINE('Transaction Account: ' || v_transaction_row.transaction_account);
+  DBMS_OUTPUT.PUT_LINE('Transaction User: ' || v_transaction_row.transaction_user);
+  DBMS_OUTPUT.PUT_LINE('Description: ' || v_transaction_row.description);
+END;
+
+
+
+CREATE OR REPLACE PROCEDURE add_user (
+  p_user_id IN NUMBER,
+  p_user_name IN VARCHAR2,
+  p_user_email IN VARCHAR2,
+  p_user_account_number IN NUMBER,
+  p_user_scholarship_amount IN NUMBER DEFAULT NULL,
+  p_user_authorisation_type IN VARCHAR2 DEFAULT NULL,
+  p_user_gpa IN NUMBER DEFAULT NULL
+) IS
+BEGIN
+  INSERT INTO users (user_id, user_name, user_email, user_account_number, user_scholarship_amount, user_authorisation_type, user_gpa)
+  VALUES (p_user_id, p_user_name, p_user_email, p_user_account_number, p_user_scholarship_amount, p_user_authorisation_type, p_user_gpa);
+  
+  COMMIT;
+  
+  DBMS_OUTPUT.PUT_LINE('User added successfully.');
+EXCEPTION
+  WHEN DUP_VAL_ON_INDEX THEN
+    DBMS_OUTPUT.PUT_LINE('User email already exists.');
+  WHEN OTHERS THEN
+    DBMS_OUTPUT.PUT_LINE('An error occurred while adding user.');
+END;
+
+
+
+
+
+
+
+CREATE OR REPLACE PROCEDURE delete_user(p_user_id IN NUMBER) IS
+BEGIN
+  DELETE FROM users WHERE user_id = p_user_id;
+  DBMS_OUTPUT.PUT_LINE('User deleted successfully');
+EXCEPTION
+  WHEN NO_DATA_FOUND THEN
+    DBMS_OUTPUT.PUT_LINE('User with ID ' || p_user_id || ' not found');
+END;
+
+
+
+
+
+CREATE OR REPLACE TRIGGER transactions_trigger
+AFTER INSERT ON transactions
+FOR EACH ROW
+BEGIN
+  -- Update expenditure table
+  IF (LOWER(:NEW.transaction_type) = 'sent') THEN
+    INSERT INTO expenditure (expenditure_id, expenditure_name, expenditure_amount, expenditure_description, expenditure_date)
+    VALUES (:NEW.transaction_id, :NEW.transaction_type, :NEW.transaction_amount, :NEW.transaction_type || ' expense', :NEW.transaction_date);
+    UPDATE users SET total_transactions = (total_transactions+1) WHERE user_id = :NEW.transaction_user;
+    -- Update scholarship and tax tables
+    IF (LOWER(:NEW.description) LIKE '%scholarship%') THEN
+      UPDATE users SET user_scholarship_amount = NVL(user_scholarship_amount, 0) + :NEW.transaction_amount WHERE user_id = :NEW.transaction_user;
+      INSERT INTO scholarship (scholarship_id, scholarship_user_id, scholarship_name, scholarship_amount, scholarship_description, scholarship_criteria)
+      VALUES (99, :NEW.transaction_user, 'Scholarship', :NEW.transaction_amount, 'Scholarship award', 'Bonus');
+    ELSIF (LOWER(:NEW.description) LIKE '%tax%') THEN
+      INSERT INTO tax (tax_id, tax_name, tax_amount, tax_rate)
+      VALUES (:NEW.transaction_id, 'Transaction Tax', :NEW.transaction_amount, 0.2);
+    END IF;
+  END IF;
+  -- Update fees table
+  IF (LOWER(:NEW.transaction_type) = 'received' AND :NEW.description IS NOT NULL AND LOWER(:NEW.description) LIKE '%fee%') THEN
+    INSERT INTO fees (fee_id, fee_name, fee_amount, fee_description, fee_date, user_id_for_fee)
+    VALUES (:NEW.transaction_id, 'FEE paid', :NEW.transaction_amount , :NEW.description, :NEW.transaction_date, :NEW.transaction_user);
+  END IF;
+  -- Update funding table
+  IF (LOWER(:NEW.transaction_type) = 'received' AND :NEW.description IS NOT NULL AND LOWER(:NEW.description) LIKE '%funding%') THEN
+    INSERT INTO funding (funding_id, funding_name, funding_amount, funding_description, funding_date)
+    VALUES (:NEW.transaction_id, 'Funding', :NEW.transaction_amount, 'Funding received', :NEW.transaction_date);
+  END IF;
+EXCEPTION
+  WHEN OTHERS THEN
+    DBMS_OUTPUT.PUT_LINE('Enter valid id of student or staff ' || SQLERRM);
+END; /
+
+CREATE OR REPLACE FUNCTION university_financials RETURN VARCHAR2 AS
+  total_received_transactions NUMBER(10,2);
+  total_received_amount NUMBER(10,2);
+  total_sent_transactions NUMBER(10,2);
+  total_sent_amount NUMBER(10,2);
+  total_tax_amount NUMBER(10,2);
+  total_user_scholarships NUMBER(10,2);
+  total_fees NUMBER(10,2);
+  total_funding NUMBER(10,2);
+  total_expenditure NUMBER(10,2);
+  net_scholarships_given NUMBER(10,2);
+  net_expenditure_after_scholarships NUMBER(10,2);
+  net_state_of_financials NUMBER(10,2);
+  profit_loss_label VARCHAR2(20);
+BEGIN
+  -- Calculate total received transactions and amount
+  SELECT COUNT(*), SUM(transaction_amount)
+  INTO total_received_transactions, total_received_amount
+  FROM transactions
+  WHERE transaction_type = 'RECEIVED';
+
+  -- Calculate total sent transactions and amount
+  SELECT COUNT(*), SUM(transaction_amount)
+  INTO total_sent_transactions, total_sent_amount
+  FROM transactions
+  WHERE transaction_type = 'SENT';
+
+  -- Calculate total tax amount
+  SELECT SUM(tax_amount * tax_rate)
+  INTO total_tax_amount
+  FROM tax;
+
+  -- Calculate total user scholarships
+  SELECT SUM(user_scholarship_amount)
+  INTO total_user_scholarships
+  FROM users;
+
+  -- Calculate total fees
+  SELECT SUM(fee_amount)
+  INTO total_fees
+  FROM fees;
+
+  -- Calculate total funding
+  SELECT SUM(funding_amount)
+  INTO total_funding
+  FROM funding;
+
+  -- Calculate total expenditure
+  SELECT SUM(expenditure_amount)
+  INTO total_expenditure
+  FROM expenditure;
+
+
+  -- Calculate net state of financials
+  net_state_of_financials := total_received_amount - total_sent_amount - total_tax_amount ;
+
+  -- Determine if the university made a profit or a loss
+  IF net_state_of_financials > 0 THEN
+    profit_loss_label := 'Profit';
+  ELSE
+    profit_loss_label := 'Loss';
+  END IF;
+
+  -- Return the results
+  RETURN 'Financial aspects of the university:' || CHR(10) ||
+         'Total received transactions: ' || total_received_transactions || CHR(10) ||
+         'Total received amount: ' || total_received_amount || CHR(10) ||
+         'Total sent transactions: ' || total_sent_transactions || CHR(10) ||
+         'Total sent amount: ' || total_sent_amount || CHR(10) ||
+         'Total tax amount: ' || total_tax_amount || CHR(10) ||
+         'Total user scholarships: ' || total_user_scholarships || CHR(10) ||
+         'Total fees: ' || total_fees || CHR(10) ||
+         'Total funding: ' || total_funding || CHR(10) ||
+         'Total expenditure: ' || total_expenditure || CHR(10) ||
+        'Net state of financials: ' || net_state_of_financials || CHR(10) ||
+       'Profit/Loss: ' || profit_loss_label;
+       END;
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+CREATE OR REPLACE PROCEDURE update_user_info(p_user_id IN NUMBER)
+IS
+  v_user_name users.user_name%TYPE;
+  v_user_email users.user_email%TYPE;
+  v_user_account_number users.user_account_number%TYPE;
+  v_user_scholarship_amount users.user_scholarship_amount%TYPE;
+  v_user_authorisation_type users.user_authorisation_type%TYPE;
+  v_user_gpa users.user_gpa%TYPE;
+  v_total_transactions users.total_transactions%TYPE;
+  v_choice VARCHAR2(1);
+BEGIN
+  -- Get current user details
+  SELECT user_name, user_email, user_account_number, user_scholarship_amount, user_authorisation_type, user_gpa, total_transactions
+  INTO v_user_name, v_user_email, v_user_account_number, v_user_scholarship_amount, v_user_authorisation_type, v_user_gpa, v_total_transactions
+  FROM users
+  WHERE user_id = p_user_id;
+
+  -- Prompt user to choose fields to update
+  DBMS_OUTPUT.PUT_LINE('Current User Details:');
+  DBMS_OUTPUT.PUT_LINE('User Name: ' || v_user_name);
+  DBMS_OUTPUT.PUT_LINE('User Email: ' || v_user_email);
+  DBMS_OUTPUT.PUT_LINE('User Account Number: ' || v_user_account_number);
+  DBMS_OUTPUT.PUT_LINE('User Scholarship Amount: ' || v_user_scholarship_amount);
+  DBMS_OUTPUT.PUT_LINE('User Authorisation Type: ' || v_user_authorisation_type);
+  DBMS_OUTPUT.PUT_LINE('User GPA: ' || v_user_gpa);
+  DBMS_OUTPUT.PUT_LINE('Total Transactions: ' || v_total_transactions);
+  
+  DBMS_OUTPUT.PUT_LINE('Choose which fields to update:');
+  DBMS_OUTPUT.PUT_LINE('1. User Name');
+  DBMS_OUTPUT.PUT_LINE('2. User Email');
+  DBMS_OUTPUT.PUT_LINE('3. User Account Number');
+  DBMS_OUTPUT.PUT_LINE('4. User Scholarship Amount');
+  DBMS_OUTPUT.PUT_LINE('5. User Authorisation Type');
+  DBMS_OUTPUT.PUT_LINE('6. User GPA');
+  DBMS_OUTPUT.PUT_LINE('7. Total Transactions');
+  DBMS_OUTPUT.PUT_LINE('Enter Choice (1-7):');
+  v_choice := '&choice';
+
+  -- Update selected fields based on user input
+  CASE v_choice
+    WHEN '1' THEN
+      SELECT '&user_name' INTO v_user_name FROM dual;
+    WHEN '2' THEN
+      SELECT '&user_email' INTO v_user_email FROM dual;
+    WHEN '3' THEN
+      SELECT '&user_account_number' INTO v_user_account_number FROM dual;
+    WHEN '4' THEN
+      SELECT '&user_scholarship_amount' INTO v_user_scholarship_amount FROM dual;
+    WHEN '5' THEN
+      SELECT '&user_authorisation_type' INTO v_user_authorisation_type FROM dual;
+    WHEN '6' THEN
+      SELECT '&user_gpa' INTO v_user_gpa FROM dual;
+    WHEN '7' THEN
+      SELECT '&total_transactions' INTO v_total_transactions FROM dual;
+	ELSE 
+	DBMS_OUTPUT.PUT_LINE('Invalid  Choice');
+
+  END CASE;
+
+  -- Update user details in database
+  UPDATE users
+  SET user_name = v_user_name,
+      user_email = v_user_email,
+      user_account_number = v_user_account_number,
+      user_scholarship_amount = v_user_scholarship_amount,
+      user_authorisation_type = v_user_authorisation_type,
+      user_gpa = v_user_gpa,
+	total_transactions = v_total_transactions
+     WHERE user_id = p_user_id;
+DBMS_OUTPUT.PUT_LINE('User details updated successfully.');
+END;
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+DECLARE
+  -- variable to hold user input
+  choice NUMBER;
+BEGIN
+  -- Display the menu
+  DBMS_OUTPUT.PUT_LINE('Menu:');
+  DBMS_OUTPUT.PUT_LINE('1. Calculate expenditure');
+  DBMS_OUTPUT.PUT_LINE('2. Insert transaction');
+  DBMS_OUTPUT.PUT_LINE('3. Add user');
+  DBMS_OUTPUT.PUT_LINE('4. Delete user');
+  DBMS_OUTPUT.PUT_LINE('5. University financials');
+  DBMS_OUTPUT.PUT_LINE('6. Update user');
+  
+  -- Read the user's choice
+  choice := &choice;
+
+  -- Call the appropriate function/procedure based on the user's choice
+  CASE choice
+    WHEN 1 THEN
+      -- variables for calculate_expenditure procedure
+      start_date DATE;
+      end_date DATE;
+      total_out NUMBER(10,2);
+      
+      -- Calculate expenditure
+      DBMS_OUTPUT.PUT_LINE('Enter start date (yyyy-mm-dd):');
+      start_date := TO_DATE('&start_date', 'yyyy-mm-dd');
+      DBMS_OUTPUT.PUT_LINE('Enter end date (yyyy-mm-dd):');
+      end_date := TO_DATE('&end_date', 'yyyy-mm-dd');
+      calculate_expenditure(start_date, end_date, total_out);
+      DBMS_OUTPUT.PUT_LINE('Total expenditure: ' || total_out);
+    
+    WHEN 2 THEN
+      -- variables for insert_transaction procedure
+      transaction_date DATE;
+      transaction_amount NUMBER(10,2);
+      transaction_type VARCHAR2(20) := 'RECEIVED';
+      transaction_account NUMBER(9) := 102103388;
+      transaction_user NUMBER(9);
+      description VARCHAR2(100);
+      
+      -- Insert transaction
+      DBMS_OUTPUT.PUT_LINE('Enter transaction date (yyyy-mm-dd):');
+      transaction_date := TO_DATE('&transaction_date', 'yyyy-mm-dd');
+  
+      DBMS_OUTPUT.PUT_LINE('Enter transaction amount:');
+      transaction_amount := &transaction_amount;
+  
+      DBMS_OUTPUT.PUT_LINE('Enter transaction type (default is RECEIVED):');
+      transaction_type := '&transaction_type';
+  
+      DBMS_OUTPUT.PUT_LINE('Enter transaction account (default is 102103388):');
+      transaction_account := &transaction_account;
+  
+      DBMS_OUTPUT.PUT_LINE('Enter transaction user:');
+      transaction_user := &transaction_user;
+  
+      DBMS_OUTPUT.PUT_LINE('Enter transaction description:');
+      description := '&description';
+  
+      insert_transaction(transaction_date, transaction_amount, transaction_type, transaction_account, transaction_user, description);
+    
+    WHEN 3 THEN
+      -- variables for add_user procedure
+      user_id NUMBER(9);
+      user_name VARCHAR2(50);
+      user_email VARCHAR2(100);
+      user_account_number NUMBER(9);
+      user_scholarship_amount NUMBER;
+      user_authorisation_type VARCHAR2(50);
+      user_gpa NUMBER(3,2);
+      
+      -- Add user
+      DBMS_OUTPUT.PUT_LINE('Enter user ID:');
+      user_id := &user_id;
+  
+      DBMS_OUTPUT.PUT_LINE('Enter user name:');
+      user_name := '&user_name';
+  
+      DBMS_OUTPUT.PUT_LINE('Enter user email:');
+      user_email := '&user_email';
+  
+      DBMS_OUTPUT.PUT_LINE('Enter user account number:');
+      user_account_number := &user_account_number;
+  
+      DBMS_OUTPUT.PUT_LINE('Enter user scholarship amount (if student) or salary/income (if staff):');
+      user_scholarship_amount := &user_scholarship_amount;
+  
+      DBMS_OUTPUT.PUT_LINE('Enter user authorisation type:');
+      user_authorisation_type := '&user_authorisation_type';
+  
+  DBMS_OUTPUT.PUT_LINE('Enter user GPA:');
+  user_gpa := &user_gpa;
+  
+  add_user(user_id, user_name, user_email, user_account_number, user_scholarship_amount, user_authorisation_type, user_gpa);
+END;
+    WHEN 4 THEN
+DECLARE   
+-- variables for delete_user procedure
+  user_id NUMBER(9);
+BEGIN
+      DBMS_OUTPUT.PUT_LINE('Enter user ID:');
+      user_id := &user_id;
+      delete_user(user_id);
+END;
+WHEN 5 THEN 
+BEGIN
+DBMS_OUTPUT.PUT_LINE(university_financials());
+END;
+    WHEN 6 THEN
+      DECLARE
+  v_user_id NUMBER(9);
+BEGIN
+  -- Prompt user to enter user ID
+  DBMS_OUTPUT.PUT_LINE('Enter User ID (9 DIGITS):');
+  v_user_id := '&user_id';
+
+  -- Call update_user_info procedure
+  update_user_info(v_user_id);
+END;
+ELSE
+    -- Code for handling invalid input
+    DBMS_OUTPUT.PUT_LINE('Invalid input. Please enter a number between 1 and 6.');
+  END CASE;
+
+END;
+
+
+
+BEGIN
+insert_transaction(SYSDATE, 5600.25, 'sent', 102103388, 456789123, 'Payment for scholarship');
+insert_transaction(to_date('2023-02-14', 'YYYY-MM-DD'), 2030, 'sent', 102103376, 456782622, 'Tax payment');
+insert_transaction(to_date('2023-03-17', 'YYYY-MM-DD'), 1550, 'received', 102103381, 456782777, 'Funding for research project');
+insert_transaction(to_date('2023-04-22', 'YYYY-MM-DD'), 2540, 'received', 102103374, 956789124, 'Summer fees refunded');
+insert_transaction(SYSDATE, 1520, 'sent', 102103388, 456789123, 'Payment for tax');
+insert_transaction(to_date('2023-06-05', 'YYYY-MM-DD'), 3060, 'sent', 102103381, 456782777, 'Scholarship payment');
+insert_transaction(to_date('2022-07-19', 'YYYY-MM-DD'), 40080, 'received', 102103376, 456782622, 'Fees paid for Fall semester');
+insert_transaction(to_date('2022-08-21', 'YYYY-MM-DD'), 3506, 'received', 102103374, 956789124, 'Funding for conference travel');
+insert_transaction(to_date('2023-09-13', 'YYYY-MM-DD'), 180, 'sent', 102103388, 456789123, 'Tax payment');
+insert_transaction(to_date('2022-10-30', 'YYYY-MM-DD'), 220, 'sent', 102103374, 956789124, 'Payment for scholarship');
+insert_transaction(to_date('2022-11-25', 'YYYY-MM-DD'), 27800, 'received', 102103381, 456782777, 'Funding for research equipment');
+insert_transaction(to_date('2022-12-31', 'YYYY-MM-DD'), 320, 'received', 102103376, 456782622, 'Winter fees refunded');
+insert_transaction(to_date('2023-01-15', 'YYYY-MM-DD'), 12800, 'sent', 987654321, 789123456, 'Scholarship payment');
+insert_transaction(SYSDATE, 1809.38, 'sent', 102103374, 956789124, 'Payment for tax');
+insert_transaction(to_date('2023-03-12', 'YYYY-MM-DD'), 2700, 'received', 123456341, 256721123, 'Fees paid for Spring semester');
+insert_transaction(to_date('2023-04-18', 'YYYY-MM-DD'), 3200, 'received', 102103376, 456782622, 'Funding for research project');
+insert_transaction(to_date('2022-05-27', 'YYYY-MM-DD'), 4200, 'sent', 102103376, 456782622, 'Scholarship payment');
+insert_transaction(to_date('2022-06-20', 'YYYY-MM-DD'), 3570, 'sent', 102103381, 456782777, 'Payment for tax');
+insert_transaction(to_date('2022-07-03', 'YYYY-MM-DD'), 2870, 'received', 102103381, 456782777, 'Funding for conference travel');
+insert_transaction(to_date('2022-08-16', 'YYYY-MM-DD'), 4180, 'received', 102103388, 456789123, 'Summer fees refunded');
+insert_transaction(to_date('2022-09-24', 'YYYY-MM-DD'), 1580, 'sent', 102103374, 956789124, 'Payment for scholarship');
+insert_transaction(SYSDATE, 2350, 'sent', 102103376, 456782622, 'Tax payment');
+insert_transaction(to_date('2022-11-09', 'YYYY-MM-DD'), 3270, 'received', 102103388, 456789123, 'Funding for research equipment');
+insert_transaction(to_date('2022-12-22', 'YYYY-MM-DD'), 250, 'received', 102103388, 456789123, 'Winter fees refunded');
+END;
+SELECT * FROM TRANSACTIONS ;
+SELECT * FROM USERS ;
+SELECT * FROM FUNDING ;
+SELECT * FROM FEES ;
+SELECT * FROM SCHOLARSHIP ;
+SELECT * FROM TAX ;
+SELECT * FROM EXPENDITURE ;
+SHOW ERRORS TRIGGER transactions_trigger;
+
